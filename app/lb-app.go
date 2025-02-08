@@ -2,6 +2,8 @@ package app
 
 import (
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -31,13 +33,14 @@ func NewLBApp(cfg *model.Config) error {
 		return errors.New("config is nil")
 	}
 
-	lbApp := &lbApp{
+	app := &lbApp{
 		servers:      make([]*serverApp, 0),
 		mux:          new(sync.Mutex),
 		currServerId: 0,
+		healthChecks: cfg.HealthCheckCfg,
 	}
 
-	go lbApp.checkIfServerHealthy()
+	go app.checkIfServerHealthy()
 
 	for _, server := range cfg.ServerList {
 		parseUrl, err := url.Parse(server)
@@ -46,16 +49,39 @@ func NewLBApp(cfg *model.Config) error {
 		}
 
 		serverApp := &serverApp{
-			mux: new(sync.Mutex),
-			url: parseUrl,
-			//isHealthy:    true,
+			mux:          new(sync.Mutex),
+			url:          parseUrl,
 			reverseProxy: httputil.NewSingleHostReverseProxy(parseUrl),
 		}
 
-		lbApp.servers = append(lbApp.servers, serverApp)
+		/* FIXME: check if required
+		serverApp.reverseProxy.Director = func(req *http.Request) {
+			req.URL.Scheme = parseUrl.Scheme
+			req.URL.Host = parseUrl.Host
+		}
+
+		*/
+
+		app.servers = append(app.servers, serverApp)
 	}
 
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
+	if err != nil {
+		return fmt.Errorf("failed to start listener: %w", err)
+	}
+	defer listener.Close()
+
+	err = http.Serve(listener, app)
+	if err != nil {
+		return err
+	}
 	return nil
+}
+
+func (lbApp *lbApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	server := lbApp.servers[lbApp.currServerId]
+	server.reverseProxy.ServeHTTP(w, r)
+
 }
 
 func (lbApp *lbApp) checkIfServerHealthy() {
@@ -64,7 +90,7 @@ func (lbApp *lbApp) checkIfServerHealthy() {
 	for _ = range ticker.C {
 		for _, server := range lbApp.servers {
 			go func() {
-				healthCheckPath, err := url.JoinPath(server.url.Host, lbApp.healthChecks.Endpoint)
+				healthCheckPath, err := url.JoinPath(server.url.String(), lbApp.healthChecks.Endpoint)
 				if err != nil {
 					return
 				}

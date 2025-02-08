@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	DEFAULT_CONFIG_FILE_NAME = "config.yaml"
+	DEFAULT_CONFIG_FILE_NAME = "config/config.yaml"
 )
 
 func main() {

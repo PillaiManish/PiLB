@@ -1,0 +1,6 @@
+port: 8080
+serverList:
+  - http://httpbin.org/
+healthCheck:
+  endpoint: "/"
+  intervalInSeconds: 5

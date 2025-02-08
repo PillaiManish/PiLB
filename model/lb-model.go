@@ -2,7 +2,7 @@ package model
 
 type (
 	Config struct {
-		Port           string          `json:"port,omitempty" yaml:"port,omitempty"`
+		Port           int             `json:"port,omitempty" yaml:"port,omitempty"`
 		ServerList     []string        `json:"serverList,omitempty" yaml:"serverList,omitempty"`
 		HealthCheckCfg *HealthCheckCfg `json:"healthCheck,omitempty" yaml:"healthCheck,omitempty"`
 	}
