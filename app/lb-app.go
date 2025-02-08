@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -79,8 +80,33 @@ func NewLBApp(cfg *model.Config) error {
 }
 
 func (lbApp *lbApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	server := lbApp.servers[lbApp.currServerId]
-	server.reverseProxy.ServeHTTP(w, r)
+	lbApp.mux.Lock()
+	defer lbApp.mux.Unlock()
+
+	server := &serverApp{}
+	idx := 0
+
+	for _ = range len(lbApp.servers) {
+		idx = lbApp.currServerId % len(lbApp.servers)
+		nextServers := lbApp.servers[idx]
+		lbApp.currServerId++
+
+		nextServers.mux.Lock()
+		isHealthy := nextServers.isHealthy
+		nextServers.mux.Unlock()
+		if isHealthy {
+			server = nextServers
+			break
+		}
+	}
+
+	if server != nil && server.url != nil {
+		log.Printf("%d: %s requesting endpoint", idx, server.url.String())
+		server.reverseProxy.ServeHTTP(w, r)
+	} else {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("no endpoint available"))
+	}
 
 }
 
