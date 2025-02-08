@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/sirupsen/logrus"
 	yaml "gopkg.in/yaml.v3"
 	"os"
 	"pi.com/lb/app"
@@ -14,14 +15,17 @@ const (
 func main() {
 	fileName := DEFAULT_CONFIG_FILE_NAME
 
+	logger := logrus.New()
+	logger.SetLevel(logrus.TraceLevel)
+
 	cfg, err := readConfigFile(fileName)
 	if err != nil {
-		panic(err)
+		logger.Fatal(err)
 	}
 
-	err = app.NewLBApp(cfg)
+	err = app.NewLBApp(cfg, logger)
 	if err != nil {
-		panic(err)
+		logger.Fatal(err)
 	}
 }
 

@@ -3,7 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
-	"log"
+	"github.com/sirupsen/logrus"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -19,6 +19,7 @@ type (
 		currServerId int // currently for round-robin, will support more in future
 		mux          *sync.Mutex
 		healthChecks *model.HealthCheckCfg
+		logger       *logrus.Logger
 	}
 
 	serverApp struct {
@@ -29,7 +30,7 @@ type (
 	}
 )
 
-func NewLBApp(cfg *model.Config) error {
+func NewLBApp(cfg *model.Config, logger *logrus.Logger) error {
 	if cfg == nil {
 		return errors.New("config is nil")
 	}
@@ -39,6 +40,7 @@ func NewLBApp(cfg *model.Config) error {
 		mux:          new(sync.Mutex),
 		currServerId: 0,
 		healthChecks: cfg.HealthCheckCfg,
+		logger:       logger,
 	}
 
 	go app.checkIfServerHealthy()
@@ -101,9 +103,10 @@ func (lbApp *lbApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if server != nil && server.url != nil {
-		log.Printf("%d: %s requesting endpoint", idx, server.url.String())
+		lbApp.logger.Debugf("%d: %s requesting endpoint", idx, server.url.String())
 		server.reverseProxy.ServeHTTP(w, r)
 	} else {
+		lbApp.logger.Debugf("no endpoints available")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte("no endpoint available"))
 	}
@@ -118,10 +121,12 @@ func (lbApp *lbApp) checkIfServerHealthy() {
 			go func() {
 				healthCheckPath, err := url.JoinPath(server.url.String(), lbApp.healthChecks.Endpoint)
 				if err != nil {
+					lbApp.logger.Debugf("failed to join url path due to err: %s", err)
 					return
 				}
 				response, err := http.Get(healthCheckPath)
 				if err != nil {
+					lbApp.logger.Debugf("failed to connect to health check due to err: %s", err)
 					server.mux.Lock()
 					server.isHealthy = false
 					server.mux.Unlock()
