@@ -2,10 +2,12 @@ package app
 
 import (
 	"errors"
+	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"pi.com/lb/model"
 	"sync"
+	"time"
 )
 
 type (
@@ -13,6 +15,7 @@ type (
 		servers      []*serverApp
 		currServerId int // currently for round-robin, will support more in future
 		mux          *sync.Mutex
+		healthChecks *model.HealthCheckCfg
 	}
 
 	serverApp struct {
@@ -34,6 +37,8 @@ func NewLBApp(cfg *model.Config) error {
 		currServerId: 0,
 	}
 
+	go lbApp.checkIfServerHealthy()
+
 	for _, server := range cfg.ServerList {
 		parseUrl, err := url.Parse(server)
 		if err != nil {
@@ -41,9 +46,9 @@ func NewLBApp(cfg *model.Config) error {
 		}
 
 		serverApp := &serverApp{
-			mux:          new(sync.Mutex),
-			url:          parseUrl,
-			isHealthy:    true,
+			mux: new(sync.Mutex),
+			url: parseUrl,
+			//isHealthy:    true,
 			reverseProxy: httputil.NewSingleHostReverseProxy(parseUrl),
 		}
 
@@ -51,4 +56,36 @@ func NewLBApp(cfg *model.Config) error {
 	}
 
 	return nil
+}
+
+func (lbApp *lbApp) checkIfServerHealthy() {
+	ticker := time.NewTicker(time.Duration(lbApp.healthChecks.IntervalInSeconds) * time.Second)
+
+	for _ = range ticker.C {
+		for _, server := range lbApp.servers {
+			go func() {
+				healthCheckPath, err := url.JoinPath(server.url.Host, lbApp.healthChecks.Endpoint)
+				if err != nil {
+					return
+				}
+				response, err := http.Get(healthCheckPath)
+				if err != nil {
+					server.mux.Lock()
+					server.isHealthy = false
+					server.mux.Unlock()
+					return
+				}
+				defer response.Body.Close()
+				server.mux.Lock()
+
+				if response.StatusCode != 200 {
+					server.isHealthy = false
+				} else {
+					server.isHealthy = true
+				}
+				server.mux.Unlock()
+			}()
+		}
+	}
+
 }

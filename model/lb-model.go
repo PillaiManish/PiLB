@@ -8,7 +8,7 @@ type (
 	}
 
 	HealthCheckCfg struct {
-		Endpoints         string `json:"endpoints,omitempty" yaml:"endpoints,omitempty"`
+		Endpoint          string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
 		IntervalInSeconds int    `json:"intervalInSeconds,omitempty" yaml:"intervalInSeconds,omitempty"`
 	}
 )
