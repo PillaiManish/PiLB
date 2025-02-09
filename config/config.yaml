@@ -1,5 +1,5 @@
 listen: 8080
-strategy: ROUND_ROBIN
+strategy: LEAST_CONN
 sticky_session: true
 
 upstream:

@@ -34,10 +34,11 @@ type (
 	}
 
 	serverInfo struct {
-		url          *url.URL
-		isHealthy    bool
-		reverseProxy *httputil.ReverseProxy
-		mux          *sync.Mutex
+		url            *url.URL
+		isHealthy      bool
+		reverseProxy   *httputil.ReverseProxy
+		mux            *sync.Mutex
+		currConnection int32
 	}
 
 	pathRouteInfo struct {
@@ -45,9 +46,8 @@ type (
 	}
 
 	metaInfo struct {
-		currServerId   int
-		mux            *sync.Mutex
-		currConnection int
+		currServerId int
+		mux          *sync.Mutex
 	}
 )
 
@@ -177,15 +177,13 @@ func (lbApp *lbApp) strategySetup() {
 
 		for _, upstream := range lbApp.upstream {
 			upstream.metaInfo = &metaInfo{
-				currServerId: 0,
-				mux:          &sync.Mutex{},
+				mux: &sync.Mutex{},
 			}
 		}
 	case model.LEAST_CONN:
 		for _, upstream := range lbApp.upstream {
 			upstream.metaInfo = &metaInfo{
-				currConnection: 0,
-				mux:            &sync.Mutex{},
+				mux: &sync.Mutex{},
 			}
 		}
 	}
