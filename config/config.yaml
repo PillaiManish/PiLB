@@ -3,32 +3,32 @@ strategy: least_conn
 sticky_session: true
 
 upstream:
-  serviceA:
-    - url: "http://serviceA-backend1.example.com"
+  localhostA:
+    - url: "https://httpbin.org/"
       weight: 3
       max_fails: 3
       fail_timeout: 30
-    - url: "http://serviceA-backend2.example.com"
+    - url: "https://httpbin.org/"
       weight: 2
       max_fails: 3
       fail_timeout: 30
 
-  serviceB:
-    - url: "http://serviceB-backend1.example.com"
+  localhostB:
+    - url: "https://httpbin.org/"
       weight: 2
       max_fails: 3
       fail_timeout: 30
-    - url: "http://serviceB-backend2.example.com"
+    - url: "https://httpbin.org/"
       weight: 1
       max_fails: 3
       fail_timeout: 30
 
 path_routes:
   - path: "/serviceA/"
-    proxy_pass: serviceA
+    proxyPass: http://google.com
 
   - path: "/serviceB/"
-    proxy_pass: serviceB
+    proxyPass: http://localhostA
 
 ssl:
   enabled: true

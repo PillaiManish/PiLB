@@ -1,13 +1,13 @@
 package app
 
 import (
-	"errors"
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"pi.com/lb/common"
 	"pi.com/lb/model"
 	"sync"
 	"time"
@@ -31,8 +31,9 @@ type (
 )
 
 func NewLBApp(cfg *model.LoadBalancerConfig, logger *logrus.Logger) error {
-	if cfg == nil {
-		return errors.New("config is nil")
+	err := common.OnStartUpValidation(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to start load balancer: %s", err)
 	}
 
 	app := &lbApp{
