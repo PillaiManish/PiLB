@@ -29,12 +29,12 @@ func main() {
 	}
 }
 
-func readConfigFile(fileName string) (*model.Config, error) {
+func readConfigFile(fileName string) (*model.LoadBalancerConfig, error) {
 	yamlFile, err := os.ReadFile(fileName)
 	if err != nil {
 		return nil, err
 	}
-	cfg := &model.Config{}
+	cfg := &model.LoadBalancerConfig{}
 	err = yaml.Unmarshal(yamlFile, cfg)
 	if err != nil {
 		return nil, err

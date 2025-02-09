@@ -18,7 +18,7 @@ type (
 		servers      []*serverApp
 		currServerId int // currently for round-robin, will support more in future
 		mux          *sync.Mutex
-		healthChecks *model.HealthCheckCfg
+		healthChecks *model.Health
 		logger       *logrus.Logger
 	}
 
@@ -30,7 +30,7 @@ type (
 	}
 )
 
-func NewLBApp(cfg *model.Config, logger *logrus.Logger) error {
+func NewLBApp(cfg *model.LoadBalancerConfig, logger *logrus.Logger) error {
 	if cfg == nil {
 		return errors.New("config is nil")
 	}
@@ -39,36 +39,33 @@ func NewLBApp(cfg *model.Config, logger *logrus.Logger) error {
 		servers:      make([]*serverApp, 0),
 		mux:          new(sync.Mutex),
 		currServerId: 0,
-		healthChecks: cfg.HealthCheckCfg,
+		healthChecks: cfg.HealthCheck,
 		logger:       logger,
 	}
 
 	go app.checkIfServerHealthy()
 
-	for _, server := range cfg.ServerList {
-		parseUrl, err := url.Parse(server)
-		if err != nil {
-			return err
+	/*
+		for _, pathRoutes := range cfg.PathRoutes {
+			for _, server := range pathRoutes.Servers {
+				parseUrl, err := url.Parse(server)
+				if err != nil {
+					return err
+				}
+
+				serverApp := &serverApp{
+					mux:          new(sync.Mutex),
+					url:          parseUrl,
+					reverseProxy: httputil.NewSingleHostReverseProxy(parseUrl),
+				}
+
+				app.servers = append(app.servers, serverApp)
+			}
 		}
 
-		serverApp := &serverApp{
-			mux:          new(sync.Mutex),
-			url:          parseUrl,
-			reverseProxy: httputil.NewSingleHostReverseProxy(parseUrl),
-		}
+	*/
 
-		/* FIXME: check if required
-		serverApp.reverseProxy.Director = func(req *http.Request) {
-			req.URL.Scheme = parseUrl.Scheme
-			req.URL.Host = parseUrl.Host
-		}
-
-		*/
-
-		app.servers = append(app.servers, serverApp)
-	}
-
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Listen))
 	if err != nil {
 		return fmt.Errorf("failed to start listener: %w", err)
 	}
