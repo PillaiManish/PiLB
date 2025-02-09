@@ -1,0 +1,9 @@
+package constants
+
+import "pi.com/lb/model"
+
+const (
+	DEFAULT_LOAD_BALANCER_STRATEGY = model.ROUND_ROBIN
+	DEFAULT_SERVER_RETRY_ATTEMPTS  = 3
+	DEFAULT_HEALTH_CHECK_INTERVAL  = 100
+)

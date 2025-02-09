@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"pi.com/lb/constants"
 	"pi.com/lb/model"
 )
 
@@ -13,7 +14,12 @@ func OnStartUpValidation(config *model.LoadBalancerConfig) error {
 	}
 
 	if config.Strategy == "" {
-		config.Strategy = model.DEFAULT_LOAD_BALANCER_STRATEGY
+		config.Strategy = constants.DEFAULT_LOAD_BALANCER_STRATEGY
+	}
+
+	healthCheckPath := ""
+	if config.HealthCheck != nil && IsStringNonEmpty(config.HealthCheck.Endpoint) {
+		healthCheckPath = config.HealthCheck.Endpoint
 	}
 
 	for name, upstream := range config.Upstream {
@@ -22,7 +28,7 @@ func OnStartUpValidation(config *model.LoadBalancerConfig) error {
 		}
 
 		for _, server := range upstream {
-			err := serverURLValidation(server.URL)
+			err := ServerURLValidation(server.URL, healthCheckPath, server.MaxFails)
 
 			if err != nil {
 				return fmt.Errorf("upstream %s: %v", name, err)
@@ -30,26 +36,26 @@ func OnStartUpValidation(config *model.LoadBalancerConfig) error {
 		}
 	}
 
-	for _, pathRoute := range config.PathRoutes {
-		if pathRoute == nil {
+	for _, location := range config.Location {
+		if location == nil {
 			return fmt.Errorf("load-balancer path route cannot be nil")
 		}
 
-		if isStringEmpty(pathRoute.Path) || isStringEmpty(pathRoute.ProxyPass) {
+		if IsStringEmpty(location.Path) || IsStringEmpty(location.ProxyPass) {
 			return fmt.Errorf("load-balancer path route/proxy pass must not be empty")
 		}
 
-		parseProxyPass, err := url.Parse(pathRoute.ProxyPass)
+		parseProxyPass, err := url.Parse(location.ProxyPass)
 		if err != nil {
-			return fmt.Errorf("error parsing proxy pass: %v url: %v", pathRoute.ProxyPass, err)
+			return fmt.Errorf("error parsing proxy pass: %v url: %v", location.ProxyPass, err)
 		}
 
-		if isStringEmpty(parseProxyPass.Host) {
+		if IsStringEmpty(parseProxyPass.Host) {
 			return fmt.Errorf("proxy pass host cannot be empty")
 		}
 
 		if _, found := config.Upstream[parseProxyPass.Hostname()]; !found {
-			err = serverURLValidation(parseProxyPass.String())
+			err = ServerURLValidation(parseProxyPass.String(), healthCheckPath, 0)
 			if err != nil {
 				return fmt.Errorf("path routes: %v", err)
 			}
@@ -59,26 +65,42 @@ func OnStartUpValidation(config *model.LoadBalancerConfig) error {
 	return nil
 }
 
-func isStringEmpty(str string) bool {
+func IsStringEmpty(str string) bool {
 	return len(str) == 0
 }
 
-func isStringNonEmpty(str string) bool {
-	return !isStringEmpty(str)
+func IsStringNonEmpty(str string) bool {
+	return !IsStringEmpty(str)
 }
 
-func serverURLValidation(URL string) error {
-	if isStringEmpty(URL) {
+func ServerURLValidation(URL, healthCheckPath string, retryAttempt int) error {
+	var err error
+	if IsStringEmpty(URL) {
 		return fmt.Errorf("URL cannot be empty")
 	}
 
-	httpResponse, err := http.Get(URL)
-	if err != nil {
-		return fmt.Errorf("error during http GET %v: %v", URL, err)
+	if retryAttempt == 0 {
+		retryAttempt = constants.DEFAULT_SERVER_RETRY_ATTEMPTS
 	}
 
-	if httpResponse.StatusCode == http.StatusServiceUnavailable {
-		return fmt.Errorf("server %s unavailable", URL)
+	if IsStringNonEmpty(healthCheckPath) {
+		URL, err = url.JoinPath(URL, healthCheckPath)
+		if err != nil {
+			return err
+		}
 	}
-	return nil
+
+	var httpResponse *http.Response
+	for _ = range retryAttempt {
+		httpResponse, err = http.Get(URL)
+		if err != nil {
+			continue
+		}
+
+		if httpResponse.StatusCode == http.StatusServiceUnavailable {
+			err = fmt.Errorf("server %s unavailable", URL)
+			continue
+		}
+	}
+	return err
 }

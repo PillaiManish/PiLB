@@ -2,12 +2,14 @@ package app
 
 import (
 	"fmt"
+	"github.com/armon/go-radix"
 	"github.com/sirupsen/logrus"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"pi.com/lb/common"
+	"pi.com/lb/constants"
 	"pi.com/lb/model"
 	"sync"
 	"time"
@@ -15,18 +17,37 @@ import (
 
 type (
 	lbApp struct {
-		servers      []*serverApp
-		currServerId int // currently for round-robin, will support more in future
-		mux          *sync.Mutex
+		strategy model.LoadBalanceStrategy
+		//upstream   map[string][]*serverInfo
+		upstream map[string]*upstreamInfo
+
+		pathRoutes *radix.Tree
+
 		healthChecks *model.Health
 		logger       *logrus.Logger
+		//*metaInfo
 	}
 
-	serverApp struct {
+	upstreamInfo struct {
+		serverInfo []*serverInfo
+		*metaInfo
+	}
+
+	serverInfo struct {
 		url          *url.URL
 		isHealthy    bool
 		reverseProxy *httputil.ReverseProxy
 		mux          *sync.Mutex
+	}
+
+	pathRouteInfo struct {
+		proxyPass string
+	}
+
+	metaInfo struct {
+		currServerId   int
+		mux            *sync.Mutex
+		currConnection int
 	}
 )
 
@@ -37,34 +58,21 @@ func NewLBApp(cfg *model.LoadBalancerConfig, logger *logrus.Logger) error {
 	}
 
 	app := &lbApp{
-		servers:      make([]*serverApp, 0),
-		mux:          new(sync.Mutex),
-		currServerId: 0,
 		healthChecks: cfg.HealthCheck,
 		logger:       logger,
+		upstream:     make(map[string]*upstreamInfo),
+		pathRoutes:   radix.New(),
+		strategy:     cfg.Strategy,
 	}
 
+	err = app.mapConfig(cfg)
+	if err != nil {
+		return err
+	}
+
+	app.strategySetup()
+
 	go app.checkIfServerHealthy()
-
-	/*
-		for _, pathRoutes := range cfg.PathRoutes {
-			for _, server := range pathRoutes.Servers {
-				parseUrl, err := url.Parse(server)
-				if err != nil {
-					return err
-				}
-
-				serverApp := &serverApp{
-					mux:          new(sync.Mutex),
-					url:          parseUrl,
-					reverseProxy: httputil.NewSingleHostReverseProxy(parseUrl),
-				}
-
-				app.servers = append(app.servers, serverApp)
-			}
-		}
-
-	*/
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Listen))
 	if err != nil {
@@ -72,6 +80,7 @@ func NewLBApp(cfg *model.LoadBalancerConfig, logger *logrus.Logger) error {
 	}
 	defer listener.Close()
 
+	logger.Debugf("started load balancer on port %d", cfg.Listen)
 	err = http.Serve(listener, app)
 	if err != nil {
 		return err
@@ -80,67 +89,124 @@ func NewLBApp(cfg *model.LoadBalancerConfig, logger *logrus.Logger) error {
 }
 
 func (lbApp *lbApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	lbApp.mux.Lock()
-	defer lbApp.mux.Unlock()
+	//FIXME: add validation for server address
 
-	server := &serverApp{}
-	idx := 0
-
-	for _ = range len(lbApp.servers) {
-		idx = lbApp.currServerId % len(lbApp.servers)
-		nextServers := lbApp.servers[idx]
-		lbApp.currServerId++
-
-		nextServers.mux.Lock()
-		isHealthy := nextServers.isHealthy
-		nextServers.mux.Unlock()
-		if isHealthy {
-			server = nextServers
-			break
-		}
-	}
-
-	if server != nil && server.url != nil {
-		lbApp.logger.Debugf("%d: %s requesting endpoint", idx, server.url.String())
-		server.reverseProxy.ServeHTTP(w, r)
-	} else {
-		lbApp.logger.Debugf("no endpoints available")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("no endpoint available"))
+	switch lbApp.strategy {
+	case model.ROUND_ROBIN:
+		lbApp.roundRobinImpl(w, r)
 	}
 
 }
 
 func (lbApp *lbApp) checkIfServerHealthy() {
-	ticker := time.NewTicker(time.Duration(lbApp.healthChecks.IntervalInSeconds) * time.Second)
+	interval := constants.DEFAULT_HEALTH_CHECK_INTERVAL
+	healthCheckPath := ""
 
-	for _ = range ticker.C {
-		for _, server := range lbApp.servers {
-			go func() {
-				healthCheckPath, err := url.JoinPath(server.url.String(), lbApp.healthChecks.Endpoint)
-				if err != nil {
-					lbApp.logger.Debugf("failed to join url path due to err: %s", err)
-					return
-				}
-				response, err := http.Get(healthCheckPath)
-				if err != nil {
-					lbApp.logger.Debugf("failed to connect to health check due to err: %s", err)
+	if lbApp.healthChecks != nil {
+
+		if lbApp.healthChecks.IntervalInSeconds > 0 {
+			interval = lbApp.healthChecks.IntervalInSeconds
+		}
+
+		if common.IsStringNonEmpty(lbApp.healthChecks.Endpoint) {
+			healthCheckPath = lbApp.healthChecks.Endpoint
+		}
+
+	}
+
+	timeTicker := time.NewTicker(time.Duration(interval) * time.Second)
+
+	for _ = range timeTicker.C {
+		go func() {
+			for name, upstream := range lbApp.upstream {
+
+				for _, server := range upstream.serverInfo {
+					err := common.ServerURLValidation(server.url.String(), healthCheckPath, 0)
+
 					server.mux.Lock()
-					server.isHealthy = false
+					if err != nil {
+						lbApp.logger.Errorf("upstream %s : server: %s unhealthy due to err: %s", name, server.url.String(), err)
+						server.isHealthy = false
+					} else {
+						lbApp.logger.Tracef("upstream %s : server: %s healthy", name, server.url.String())
+						server.isHealthy = true
+					}
 					server.mux.Unlock()
-					return
 				}
-				defer response.Body.Close()
-				server.mux.Lock()
+			}
+		}()
 
-				if response.StatusCode != 200 {
-					server.isHealthy = false
-				} else {
-					server.isHealthy = true
-				}
-				server.mux.Unlock()
-			}()
+	}
+
+}
+
+func (lbApp *lbApp) mapConfig(cfg *model.LoadBalancerConfig) error {
+
+	for name, upstream := range cfg.Upstream {
+		lbApp.upstream[name] = &upstreamInfo{
+			serverInfo: make([]*serverInfo, 0),
+		}
+
+		for _, server := range upstream {
+			parseURL, err := url.Parse(server.URL)
+			if err != nil {
+				return err
+			}
+
+			info := &serverInfo{
+				isHealthy:    true,
+				reverseProxy: httputil.NewSingleHostReverseProxy(parseURL),
+				mux:          &sync.Mutex{},
+				url:          parseURL,
+			}
+
+			lbApp.upstream[name].serverInfo = append(lbApp.upstream[name].serverInfo, info)
 		}
 	}
 
+	for _, location := range cfg.Location {
+		lbApp.pathRoutes.Insert(location.Path, &pathRouteInfo{proxyPass: location.ProxyPass})
+	}
+
+	return nil
+}
+
+func (lbApp *lbApp) strategySetup() {
+	switch lbApp.strategy {
+	case model.ROUND_ROBIN:
+
+		for _, upstream := range lbApp.upstream {
+			upstream.metaInfo = &metaInfo{
+				currServerId: 0,
+				mux:          &sync.Mutex{},
+			}
+		}
+	case model.LEAST_CONN:
+		for _, upstream := range lbApp.upstream {
+			upstream.metaInfo = &metaInfo{
+				currConnection: 0,
+				mux:            &sync.Mutex{},
+			}
+		}
+	}
+}
+
+func (lbApp *lbApp) mostMatchingLocation(requestPath string, w http.ResponseWriter) (*url.URL, error) {
+
+	_, bestMatch, found := lbApp.pathRoutes.LongestPrefix(requestPath)
+	if !found {
+		http.Error(w, "Service Not Found", http.StatusNotFound)
+		return nil, fmt.Errorf("service Not Found")
+	}
+
+	route := bestMatch.(*pathRouteInfo)
+
+	// Parse the proxy URL
+	parseURL, err := url.Parse(route.proxyPass)
+	if err != nil {
+		http.Error(w, "Invalid Proxy URL", http.StatusInternalServerError)
+		return nil, fmt.Errorf("invalid Proxy URL")
+	}
+
+	return parseURL, nil
 }

@@ -1,15 +1,11 @@
 listen: 8080
-strategy: least_conn
+strategy: ROUND_ROBIN
 sticky_session: true
 
 upstream:
   localhostA:
     - url: "https://httpbin.org/"
       weight: 3
-      max_fails: 3
-      fail_timeout: 30
-    - url: "https://httpbin.org/"
-      weight: 2
       max_fails: 3
       fail_timeout: 30
 
@@ -22,13 +18,17 @@ upstream:
       weight: 1
       max_fails: 3
       fail_timeout: 30
+    - url: "https://httpbin.org/"
+      weight: 1
+      max_fails: 3
+      fail_timeout: 30
 
-path_routes:
-  - path: "/serviceA/"
-    proxyPass: http://google.com
-
-  - path: "/serviceB/"
+location:
+  - path: "/get"
     proxyPass: http://localhostA
+
+  - path: "/anything"
+    proxyPass: http://localhostB
 
 ssl:
   enabled: true
@@ -37,7 +37,7 @@ ssl:
 
 health_check:
   endpoint: "/healthcheck"
-  interval: 5
+  interval: 10
 
 rate_limit:
   enabled: true

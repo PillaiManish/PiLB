@@ -16,7 +16,12 @@ func main() {
 	fileName := DEFAULT_CONFIG_FILE_NAME
 
 	logger := logrus.New()
-	logger.SetLevel(logrus.TraceLevel)
+	customFormatter := new(logrus.TextFormatter)
+	customFormatter.TimestampFormat = "2006-01-02 15:04:05"
+	customFormatter.FullTimestamp = true
+	logger.SetFormatter(customFormatter)
+
+	logger.SetLevel(logrus.DebugLevel)
 
 	cfg, err := readConfigFile(fileName)
 	if err != nil {

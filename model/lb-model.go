@@ -1,10 +1,9 @@
 package model
 
 const (
-	ROUND_ROBIN                    LoadBalanceStrategy = "ROUND_ROBIN"
-	LEAST_CONN                     LoadBalanceStrategy = "LEAST_CONN"
-	RANDOM                         LoadBalanceStrategy = "RANDOM"
-	DEFAULT_LOAD_BALANCER_STRATEGY                     = ROUND_ROBIN
+	ROUND_ROBIN LoadBalanceStrategy = "ROUND_ROBIN"
+	LEAST_CONN  LoadBalanceStrategy = "LEAST_CONN"
+	RANDOM      LoadBalanceStrategy = "RANDOM"
 )
 
 type (
@@ -14,7 +13,7 @@ type (
 		Listen        int                  `yaml:"listen,omitempty"`
 		ServerName    string               `yaml:"server_name,omitempty"` // allowed client host
 		Upstream      map[string][]*Server `yaml:"upstream,omitempty"`
-		PathRoutes    []*PathRoute         `yaml:"path_routes,omitempty"`
+		Location      []*Location          `yaml:"location,omitempty"`
 		Strategy      LoadBalanceStrategy  `yaml:"strategy,omitempty"`
 		StickySession bool                 `yaml:"sticky_session,omitempty"`
 		SSLConfig     *SSL                 `yaml:"ssl,omitempty"`
@@ -23,7 +22,7 @@ type (
 		Timeouts      *Timeout             `yaml:"timeouts,omitempty"`
 	}
 
-	PathRoute struct {
+	Location struct {
 		Path      string `yaml:"path,omitempty"`
 		ProxyPass string `yaml:"proxyPass,omitempty"` // by default right now HTTP, will support for me in future
 	}
